@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 
-	"gopkg.in/urfave/cli.v1"
 	"github.com/codegangsta/envy/lib"
 	"github.com/codegangsta/gin/lib"
+	"gopkg.in/urfave/cli.v1"
 
 	"log"
 	"os"
@@ -54,9 +54,15 @@ func main() {
 			Usage: "name of generated binary file",
 		},
 		cli.StringFlag{
+			Name:  "cwd,d",
+			Value: ".",
+			Usage: "Directory to build from",
+		},
+		cli.StringFlag{
 			Name:  "path,t",
 			Value: ".",
-			Usage: "Path to watch files from",
+			Usage: fmt.Sprintf("Path or paths to watch files from (e.g. \".%csome/path%c../another/one\")",
+				os.PathListSeparator, os.PathListSeparator),
 		},
 		cli.StringSliceFlag{
 			Name:  "excludeDir,x",
@@ -177,30 +183,33 @@ func build(builder gin.Builder, runner gin.Runner, logger *log.Logger) {
 type scanCallback func(path string)
 
 func scanChanges(watchPath string, excludeDirs []string, cb scanCallback) {
+	paths := filepath.SplitList(watchPath)
 	for {
-		filepath.Walk(watchPath, func(path string, info os.FileInfo, err error) error {
-			if path == ".git" {
-				return filepath.SkipDir
-			}
-			for _, x := range excludeDirs {
-				if x == path {
+		for _, path := range paths {
+			filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+				if path == ".git" {
 					return filepath.SkipDir
 				}
-			}
+				for _, x := range excludeDirs {
+					if x == path {
+						return filepath.SkipDir
+					}
+				}
 
-			// ignore hidden files
-			if filepath.Base(path)[0] == '.' {
+				// ignore hidden files
+				if filepath.Base(path)[0] == '.' {
+					return nil
+				}
+
+				if filepath.Ext(path) == ".go" && info.ModTime().After(startTime) {
+					cb(path)
+					startTime = time.Now()
+					return errors.New("done")
+				}
+
 				return nil
-			}
-
-			if filepath.Ext(path) == ".go" && info.ModTime().After(startTime) {
-				cb(path)
-				startTime = time.Now()
-				return errors.New("done")
-			}
-
-			return nil
-		})
+			})
+		}
 		time.Sleep(500 * time.Millisecond)
 	}
 }
